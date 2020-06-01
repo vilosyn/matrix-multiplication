@@ -13,8 +13,8 @@ __kernel void matrixVectorMul(__global double *resultVector,
   // int i = get_global_id(0);
   // int j = get_global_id(1);
   __local double value;
-  int i = 16 * get_group_id(0) + get_local_id(0);
-  int j = 16 * get_group_id(1) + get_local_id(1);
+  int i = get_local_size(0) * get_group_id(0) + get_local_id(0);
+  int j = get_local_size(1) * get_group_id(1) + get_local_id(1);
   if (i < width_A && j < width_A) {
     value = 0;
     for (unsigned int k = 0; k < height_A; ++k)
