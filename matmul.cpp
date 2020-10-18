@@ -94,15 +94,19 @@ void PerformCalculationOnHost(int &WIDTH_A, int &HEIGHT_A,
                               std::vector<double> &matrix_A,
                               std::vector<double> &matrix_B,
                               std::vector<double> &result_matrix_host) {
-#pragma omp parallel for collapse(2) num_threads(8)
-  for (int i = 0; i < WIDTH_A; i++)
-    for (int j = 0; j < WIDTH_A; j++) {
-      double tmp = 0;
-      for (int k = 0; k < HEIGHT_A; k++)
-        tmp += matrix_A[j * HEIGHT_A + k] * matrix_B[k * WIDTH_A + i];
+#pragma omp parallel num_threads(16)
+  {
+#pragma omp for
+    for (int i = 0; i < WIDTH_A; i++)
+#pragma omp simd
+      for (int j = 0; j < WIDTH_A; j++) {
+        double tmp = 0;
+        for (int k = 0; k < HEIGHT_A; k++)
+          tmp += matrix_A[j * HEIGHT_A + k] * matrix_B[k * WIDTH_A + i];
 
-      result_matrix_host[j * WIDTH_A + i] = tmp;
-    }
+        result_matrix_host[j * WIDTH_A + i] = tmp;
+      }
+  }
 }
 
 int main(int argc, char **argv) {
@@ -123,6 +127,7 @@ int main(int argc, char **argv) {
   cl::Platform::get(&platforms);
   std::vector<cl::Device> devices;
   for (size_t iPlatform = 0; iPlatform < platforms.size(); iPlatform++) {
+    auto start_t = std::chrono::high_resolution_clock::now();
     platforms[iPlatform].getDevices(CL_DEVICE_TYPE_ALL, &devices);
     for (size_t iDevice = 0; iDevice < devices.size(); iDevice++) {
       try {
@@ -132,31 +137,31 @@ int main(int argc, char **argv) {
         std::cout << "Device:   " << devices[iDevice].getInfo<CL_DEVICE_NAME>()
                   << std::endl;
         std::fill(result_matrix.begin(), result_matrix.end(), 0.);
-        auto start_t = std::chrono::high_resolution_clock::now();
         PerformCalculationOnDevice(devices[iDevice], WIDTH_A, HEIGHT_A,
                                    matrix_A, matrix_B, result_matrix);
-        auto end_t = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double> diff = end_t - start_t;
-        std::cout << "Device:                 " << diff.count() << " s\n";
-        double max_deviation = 0;
-        FILE *f, *f_host;
-        f = fopen("device_result", "w");
-        f_host = fopen("host_result", "w");
-#pragma omp parallel for reduction(max : max_deviation) num_threads(8)
-        for (int i = 0; i < WIDTH_A * HEIGHT_A; i++) {
-          fprintf(f, "%.2f\n", result_matrix[i]);
-          fprintf(f_host, "%.2f\n", result_matrix_host[i]);
-          max_deviation = std::max(
-              max_deviation, fabs(result_matrix[i] - result_matrix_host[i]));
-        }
-
-        fclose(f);
-        fclose(f_host);
-        std::cout << "Max deviation = " << max_deviation << std::endl;
       } catch (cl::Error error) {
         std::cout << error.what() << "(" << error.err() << ")" << std::endl;
       }
     }
+
+    auto end_t = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end_t - start_t;
+    std::cout << "Device:                 " << diff.count() << " s\n";
+    double max_deviation = 0;
+    FILE *f, *f_host;
+    f = fopen("device_result", "w");
+    f_host = fopen("host_result", "w");
+#pragma omp parallel for reduction(max : max_deviation) num_threads(16)
+    for (int i = 0; i < WIDTH_A * HEIGHT_A; i++) {
+      fprintf(f, "%.2f\n", result_matrix[i]);
+      fprintf(f_host, "%.2f\n", result_matrix_host[i]);
+      max_deviation = std::max(max_deviation,
+                               fabs(result_matrix[i] - result_matrix_host[i]));
+    }
+
+    fclose(f);
+    fclose(f_host);
+    std::cout << "Max deviation = " << max_deviation << std::endl;
   }
 
   return 0;
